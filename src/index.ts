@@ -133,6 +133,7 @@ Returns:
 
 const QueryInputSchema = z.object({
   endpoint: z.string()
+    .max(200)
     .describe("API endpoint path from the discover tool (e.g. '/v1/weather/{city}', '/v1/rates', '/v1/police/events')"),
   path_params: z.record(z.string())
     .optional()
@@ -182,14 +183,24 @@ Error handling:
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: true,
+      openWorldHint: false,
     },
   },
   async (params) => {
+    const endpoint = ENDPOINTS.find(e => e.path === params.endpoint);
+    if (!endpoint) {
+      return {
+        content: [{
+          type: "text",
+          text: `Error: Unsupported endpoint "${params.endpoint}". Use govdata_discover to select one of the ${ENDPOINTS.length} supported Apiverket endpoints.`,
+        }],
+      };
+    }
+
     // Resolve path parameters if provided
     const resolvedPath = params.path_params
-      ? resolvePathParams(params.endpoint, params.path_params)
-      : params.endpoint;
+      ? resolvePathParams(endpoint.path, params.path_params)
+      : endpoint.path;
 
     // Validate path doesn't still contain unresolved {params}
     const unresolvedMatch = resolvedPath.match(/\{(\w+)\}/);

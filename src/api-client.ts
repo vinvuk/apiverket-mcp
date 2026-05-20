@@ -24,6 +24,40 @@ function getApiKey(): string {
 }
 
 /**
+ * Builds and validates the outbound Apiverket URL.
+ * @param baseUrl - Configured Apiverket base URL
+ * @param path - Resolved API path
+ * @param queryParams - Optional query parameters
+ * @returns A URL object scoped to the configured API origin
+ */
+function buildApiUrl(
+  baseUrl: string,
+  path: string,
+  queryParams?: Record<string, string | number | boolean | undefined>
+): URL {
+  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || /[\r\n]/.test(path)) {
+    throw new Error("Endpoint must be a relative API path starting with a single slash.");
+  }
+
+  const base = new URL(baseUrl);
+  const url = new URL(path, base);
+
+  if (url.origin !== base.origin) {
+    throw new Error("Endpoint resolved outside the configured Apiverket API origin.");
+  }
+
+  if (queryParams) {
+    for (const [key, value] of Object.entries(queryParams)) {
+      if (value !== undefined && value !== null) {
+        url.searchParams.set(key, String(value));
+      }
+    }
+  }
+
+  return url;
+}
+
+/**
  * Replaces path parameters like {city} or {code} in a URL template.
  * @param pathTemplate - URL path with {param} placeholders
  * @param pathParams - Object mapping param names to values
@@ -38,19 +72,6 @@ export function resolvePathParams(
     resolved = resolved.replace(`{${key}}`, encodeURIComponent(value));
   }
   return resolved;
-}
-
-/**
- * Builds a query string from an object of key-value pairs.
- * Skips undefined and null values.
- * @param params - Query parameter object
- * @returns Query string starting with "?" or empty string
- */
-function buildQueryString(params: Record<string, string | number | boolean | undefined>): string {
-  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
-  if (entries.length === 0) return "";
-  const qs = entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&");
-  return `?${qs}`;
 }
 
 /** Structured result from an API call. */
@@ -73,10 +94,9 @@ export async function callApi(
 ): Promise<ApiResult> {
   const baseUrl = getBaseUrl();
   const apiKey = getApiKey();
-  const qs = queryParams ? buildQueryString(queryParams) : "";
-  const url = `${baseUrl}${path}${qs}`;
 
   try {
+    const url = buildApiUrl(baseUrl, path, queryParams);
     const response = await fetch(url, {
       method: "GET",
       headers: {
