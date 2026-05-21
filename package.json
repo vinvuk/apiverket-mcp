@@ -2,17 +2,48 @@
   "name": "apiverket-mcp-server",
   "version": "1.0.0",
   "description": "MCP server for querying Swedish government data via Apiverket API",
+  "mcpName": "io.github.vinvuk/apiverket-mcp",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
+    "apiverket-mcp-server": "dist/index.js",
     "govdata-mcp-server": "dist/index.js"
   },
   "scripts": {
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepack": "npm run clean && npm run build"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "server.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vinvuk/apiverket-mcp.git"
+  },
+  "homepage": "https://github.com/vinvuk/apiverket-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/vinvuk/apiverket-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "apiverket",
+    "sweden",
+    "swedish-public-data",
+    "government-data",
+    "open-data",
+    "scb",
+    "smhi",
+    "bolagsverket",
+    "trafikverket"
+  ],
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },

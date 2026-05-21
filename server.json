@@ -1,0 +1,38 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.vinvuk/apiverket-mcp",
+  "title": "Apiverket",
+  "description": "Query Swedish public data: companies, SCB statistics, weather, transport, and more.",
+  "repository": {
+    "url": "https://github.com/vinvuk/apiverket-mcp",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "apiverket-mcp-server",
+      "version": "1.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "description": "Apiverket API base URL",
+          "isRequired": false,
+          "format": "string",
+          "default": "https://apiverket.se",
+          "name": "GOVDATA_API_URL"
+        },
+        {
+          "description": "Apiverket API key. Use sk_test_demo for sandbox data or create a key at https://apiverket.se/login.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "default": "sk_test_demo",
+          "name": "GOVDATA_API_KEY"
+        }
+      ]
+    }
+  ]
+}

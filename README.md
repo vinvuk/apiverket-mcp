@@ -1,6 +1,8 @@
 # Apiverket MCP Server
 
-An MCP (Model Context Protocol) server that gives AI assistants access to **139 Swedish government data endpoints** via the [Apiverket API](https://apiverket.se). Works with Claude Code, Claude Desktop, Cursor, VS Code, and any MCP-compatible client.
+<!-- mcp-name: io.github.vinvuk/apiverket-mcp -->
+
+An MCP (Model Context Protocol) server that gives AI assistants access to **120+ Swedish public data endpoints** via the [Apiverket API](https://apiverket.se). Works with Claude Code, Claude Desktop, Cursor, VS Code, and any MCP-compatible client.
 
 ## What it does
 
@@ -8,7 +10,7 @@ Two tools, one goal: let AI assistants query Swedish public data using natural l
 
 | Tool | Purpose |
 |------|---------|
-| `govdata_discover` | Search and browse 139 endpoints across 16 categories |
+| `govdata_discover` | Search and browse 120+ endpoints across 16 categories |
 | `govdata_query` | Call any endpoint and get structured JSON data |
 
 Ask *"What's the weather in Stockholm?"* or *"Show train delays from Gothenburg"* — the AI finds the right endpoint, fills in parameters, and returns the data.
@@ -64,7 +66,7 @@ Add to `.cursor/mcp.json` or `.vscode/mcp.json`:
   "mcpServers": {
     "apiverket": {
       "command": "npx",
-      "args": ["apiverket-mcp-server"],
+      "args": ["-y", "apiverket-mcp-server"],
       "env": {
         "GOVDATA_API_URL": "https://apiverket.se",
         "GOVDATA_API_KEY": "sk_test_demo"
@@ -124,7 +126,7 @@ govdata_query(endpoint: "/v1/weather/{city}", path_params: {city: "stockholm"})
 govdata_query(endpoint: "/v1/jobs/search", query_params: {q: "developer", limit: 5})
 
 # Exchange rates
-govdata_query(endpoint: "/v1/rates/exchange")
+govdata_query(endpoint: "/v1/rates")
 
 # Train departures
 govdata_query(endpoint: "/v1/transport/trains/{station}", path_params: {station: "Cst"})
