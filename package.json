@@ -14,6 +14,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "clean": "rm -rf dist",
+    "mcpb:pack": "node scripts/build-mcpb.mjs",
     "prepack": "npm run clean && npm run build"
   },
   "files": [

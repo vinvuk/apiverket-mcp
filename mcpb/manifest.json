@@ -1,0 +1,86 @@
+{
+  "manifest_version": "0.3",
+  "name": "apiverket-mcp",
+  "display_name": "Apiverket MCP",
+  "version": "1.0.0",
+  "description": "Query Swedish public data through Apiverket, including company data, SCB statistics, weather, transport, and more.",
+  "long_description": "Apiverket MCP gives AI agents two read-only tools for Swedish public data: govdata_discover to find relevant endpoints and govdata_query to call them. It supports company lookup, SCB statistics, weather, transport, public agencies, and other Apiverket endpoints through a consistent JSON API.",
+  "author": {
+    "name": "Vincent Vukovic",
+    "email": "hello@apiverket.se",
+    "url": "https://apiverket.se"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vinvuk/apiverket-mcp.git"
+  },
+  "homepage": "https://apiverket.se",
+  "documentation": "https://github.com/vinvuk/apiverket-mcp#readme",
+  "support": "https://github.com/vinvuk/apiverket-mcp/issues",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/index.js"
+      ],
+      "env": {
+        "GOVDATA_API_URL": "${user_config.govdata_api_url}",
+        "GOVDATA_API_KEY": "${user_config.govdata_api_key}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "govdata_discover",
+      "description": "Search and browse available Apiverket endpoints"
+    },
+    {
+      "name": "govdata_query",
+      "description": "Call a selected Apiverket endpoint and return structured JSON"
+    }
+  ],
+  "keywords": [
+    "mcp",
+    "sweden",
+    "swedish-public-data",
+    "open-data",
+    "government-data",
+    "companies",
+    "statistics",
+    "weather",
+    "transport"
+  ],
+  "license": "MIT",
+  "privacy_policies": [
+    "https://apiverket.se/privacy"
+  ],
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  },
+  "user_config": {
+    "govdata_api_url": {
+      "type": "string",
+      "title": "Apiverket API URL",
+      "description": "Base URL for the Apiverket API",
+      "default": "https://apiverket.se",
+      "required": false
+    },
+    "govdata_api_key": {
+      "type": "string",
+      "title": "Apiverket API key",
+      "description": "Use sk_test_demo for sandbox data or create a key at https://apiverket.se/login",
+      "default": "sk_test_demo",
+      "sensitive": true,
+      "required": false
+    }
+  }
+}
