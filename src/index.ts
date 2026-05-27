@@ -55,7 +55,7 @@ server.registerTool(
     title: "Discover Apiverket Endpoints",
     description: `Search and browse available Swedish government data endpoints in the Apiverket API.
 
-Use this tool to find the right endpoint before calling govdata_query. The API covers 139 endpoints across 16 categories including weather, transport, economy, health, environment, parliament, police, education, and more.
+Use this tool to find the right endpoint before calling govdata_query. Do not guess /v1 paths; discover the supported path here first. The API covers 139 endpoints across 16 categories including weather, transport, economy, health, environment, parliament, police, education, and more.
 
 Args:
   - query (string, optional): Keyword to search across endpoint names, descriptions, and paths
@@ -149,7 +149,7 @@ server.registerTool(
     title: "Query Apiverket API",
     description: `Call any Apiverket API endpoint to retrieve Swedish government data.
 
-Use govdata_discover first to find the right endpoint path and required parameters. Then call this tool with the endpoint path and any path/query parameters.
+Use govdata_discover first to find the right endpoint path and required parameters instead of guessing /v1 paths. Then call this tool with the endpoint path and any path/query parameters.
 
 Args:
   - endpoint (string, required): The API path (e.g. "/v1/weather/{city}")

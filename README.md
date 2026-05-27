@@ -13,7 +13,7 @@ Two tools, one goal: let AI assistants query Swedish public data using natural l
 | `govdata_discover` | Search and browse 120+ endpoints across 16 categories |
 | `govdata_query` | Call any endpoint and get structured JSON data |
 
-Ask *"What's the weather in Stockholm?"* or *"Show train delays from Gothenburg"* — the AI finds the right endpoint, fills in parameters, and returns the data.
+Ask *"What's the weather in Stockholm?"* or *"Show train delays from Gothenburg"* — the AI finds the right endpoint, fills in parameters, and returns the data. Use `govdata_discover` first instead of guessing `/v1` paths.
 
 ## Categories
 
@@ -98,7 +98,7 @@ The test key (`sk_test_demo`) returns sandbox data for all endpoints — no sign
 
 ### `govdata_discover`
 
-Search and browse available endpoints.
+Search and browse available endpoints. This is the first tool agents should call when they do not already know the exact Apiverket path.
 
 ```
 # List all categories
