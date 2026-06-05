@@ -14,13 +14,20 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { ENDPOINTS, searchEndpoints, getEndpointsByCategory, getCategories } from "./endpoints.js";
 import { callApi, resolvePathParams, truncateIfNeeded } from "./api-client.js";
+import type { ApiResult } from "./api-client.js";
 import type { Endpoint } from "./endpoints.js";
+import {
+  endpointPlaybookRank,
+  formatFamilyPlaybook,
+  matchFamilyPlaybooks,
+} from "./playbooks.js";
+import { pathToFileURL } from "node:url";
 
 // ── Server instance ──────────────────────────────────────────────────
 
 const server = new McpServer({
   name: "govdata-mcp-server",
-  version: "1.0.0",
+  version: "1.2.0",
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -30,11 +37,182 @@ const server = new McpServer({
  * @param ep - The endpoint to format
  * @returns A human-readable markdown string
  */
-function formatEndpoint(ep: Endpoint): string {
+export function formatEndpoint(ep: Endpoint): string {
   const params = ep.parameters.length > 0
     ? ep.parameters.map(p => `  - \`${p.name}\` (${p.in}${p.required ? ", required" : ""}): ${p.description}`).join("\n")
     : "  None";
-  return `### ${ep.summary}\n\`${ep.method.toUpperCase()} ${ep.path}\`\nCategory: ${ep.category}\n${ep.description}\n**Parameters:**\n${params}`;
+  const guidance = ep.guidance ? [
+    ep.guidance.whenToUse ? `**When to use:** ${ep.guidance.whenToUse}` : undefined,
+    ep.guidance.workflow?.length ? `**Workflow:**\n${ep.guidance.workflow.map((item, index) => `  ${index + 1}. ${item}`).join("\n")}` : undefined,
+    ep.guidance.constraints?.length ? `**Constraints:**\n${ep.guidance.constraints.map(item => `  - ${item}`).join("\n")}` : undefined,
+    ep.guidance.avoid?.length ? `**Avoid:**\n${ep.guidance.avoid.map(item => `  - ${item}`).join("\n")}` : undefined,
+    ep.guidance.quotaNotes?.length ? `**Quota notes:**\n${ep.guidance.quotaNotes.map(item => `  - ${item}`).join("\n")}` : undefined,
+    ep.guidance.recovery?.length ? `**Recovery:**\n${ep.guidance.recovery.map(item => `  - ${item}`).join("\n")}` : undefined,
+    ep.guidance.examples?.length ? `**Examples:**\n${ep.guidance.examples.map(item => `  - ${item}`).join("\n")}` : undefined,
+    ep.guidance.upgradeTrigger ? `**Upgrade trigger:** ${ep.guidance.upgradeTrigger}` : undefined,
+  ].filter(Boolean).join("\n") : "";
+
+  return [
+    `### ${ep.summary}`,
+    `\`${ep.method.toUpperCase()} ${ep.path}\``,
+    `Category: ${ep.category}`,
+    ep.description,
+    `**Parameters:**\n${params}`,
+    guidance,
+  ].filter(Boolean).join("\n");
+}
+
+function maskPath(path: string): string {
+  if (/^\/v1\/companies\/search(?:$|[/?#])/.test(path)) return "/v1/companies/search";
+  if (/^\/v1\/companies\/[^/]+\/.+/.test(path)) return "/v1/companies/:orgNumber/:subpath";
+  if (/^\/v1\/companies\/[^/]+/.test(path)) return "/v1/companies/:orgNumber";
+  return path;
+}
+
+export function formatUnsupportedEndpoint(endpoint: string): string {
+  if (/^\/v1\/companies(?:\/|$)/.test(endpoint)) {
+    const subresource = /^\/v1\/companies\/[^/]+\/.+/.test(endpoint) || /^\/v1\/companies\/(board|officers?|directors?|owners?|beneficial-owners|ubo|representatives)(?:\/|$)/i.test(endpoint);
+    return [
+      `Error: Unsupported company endpoint "${subresource ? "/v1/companies/:orgNumber/:subpath" : maskPath(endpoint)}".`,
+      "Use govdata_discover with query=\"company\" to select a supported company endpoint.",
+      "Supported workflow: call /v1/companies/search once when you only have a company name, cache the returned org_number, then call /v1/companies/{orgNumber} for repeated lookups.",
+      "Apiverket does not expose board, officer, owner, UBO, or other company subresource paths through the company API.",
+    ].join("\n");
+  }
+
+  const playbooks = matchFamilyPlaybooks(endpoint);
+  if (playbooks.length) {
+    return [
+      `Error: Unsupported endpoint "${maskPath(endpoint)}".`,
+      "Use govdata_discover to select a supported Apiverket endpoint instead of guessing /v1 paths.",
+      formatFamilyPlaybook(playbooks[0]),
+    ].join("\n\n");
+  }
+
+  return `Error: Unsupported endpoint "${endpoint}". Use govdata_discover to select one of the ${ENDPOINTS.length} supported Apiverket endpoints instead of guessing /v1 paths.`;
+}
+
+export function formatApiFailure(path: string, result: ApiResult): string {
+  const err = result.errorDetails;
+  const lines = [
+    `Error querying ${maskPath(path)}: ${err?.message ?? result.error ?? `HTTP ${result.status}`}`,
+  ];
+
+  if (result.status) lines.push(`Status: ${result.status}`);
+  if (err?.code) lines.push(`Code: ${err.code}`);
+  if (err?.param) lines.push(`Parameter: ${err.param}`);
+  if (err?.request_id) lines.push(`Request ID: ${err.request_id}`);
+
+  if (err?.guidance?.message) lines.push(`Guidance: ${err.guidance.message}`);
+  if (err?.guidance?.action) lines.push(`Recommended action: ${err.guidance.action}`);
+
+  const rateLimit = err?.rate_limit;
+  if (rateLimit) {
+    const parts = [
+      rateLimit.scope ? `scope=${rateLimit.scope}` : undefined,
+      rateLimit.tier ? `tier=${rateLimit.tier}` : undefined,
+      typeof rateLimit.limit === "number" ? `limit=${rateLimit.limit}` : undefined,
+      typeof rateLimit.remaining === "number" ? `remaining=${rateLimit.remaining}` : undefined,
+      rateLimit.reset_at ? `reset_at=${rateLimit.reset_at}` : undefined,
+      rateLimit.retry_after_seconds ? `retry_after_seconds=${rateLimit.retry_after_seconds}` : undefined,
+    ].filter(Boolean);
+    if (parts.length) lines.push(`Rate limit: ${parts.join(", ")}`);
+  } else if (result.retryAfter) {
+    lines.push(`Retry-After: ${result.retryAfter} seconds`);
+  }
+
+  if (err?.help?.message) lines.push(`Help: ${err.help.message}`);
+  if (err?.help?.suggested_endpoint) lines.push(`Suggested endpoint: ${err.help.suggested_endpoint}`);
+  if (err?.help?.available_examples?.length) lines.push(`Available examples: ${err.help.available_examples.join(", ")}`);
+  else if (err?.help?.examples?.length) lines.push(`Examples: ${err.help.examples.join(", ")}`);
+
+  if (err?.rate_limit?.scope === "company_search_daily") {
+    lines.push("Company-search recovery: stop retrying search until reset_at, use /v1/companies/{orgNumber} if you already have org numbers, and call govdata_account to inspect the current tier and remaining company-search quota.");
+    if (err.guidance?.upgrade_url) lines.push(`Upgrade when needed: ${err.guidance.upgrade_url}`);
+  }
+
+  if (err?.param === "orgNumber" || maskPath(path).startsWith("/v1/companies/")) {
+    lines.push("Company lookup tip: organisation numbers must be valid Swedish 10-digit numbers. If the user only gave a company name, use /v1/companies/search first and cache the returned org_number.");
+  }
+
+  const playbooks = matchFamilyPlaybooks(path);
+  if (playbooks.length && !maskPath(path).startsWith("/v1/companies/")) {
+    lines.push("Family recovery:");
+    for (const item of playbooks[0].recovery ?? playbooks[0].workflow.slice(0, 2)) {
+      lines.push(`- ${item}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function formatNumber(value: unknown): string {
+  return typeof value === "number" ? value.toLocaleString("en-US") : "unknown";
+}
+
+function formatPrice(value: unknown): string {
+  if (typeof value !== "number") return "custom";
+  return value === 0 ? "0 SEK/mo" : `${value.toLocaleString("en-US")} SEK/mo`;
+}
+
+export async function buildAccountSummary(): Promise<string> {
+  const [infoResult, usageResult, tiersResult] = await Promise.all([
+    callApi("/v1/account/info"),
+    callApi("/v1/account/usage"),
+    callApi("/v1/account/tiers"),
+  ]);
+
+  if (!infoResult.success) return formatApiFailure("/v1/account/info", infoResult);
+  if (!usageResult.success) return formatApiFailure("/v1/account/usage", usageResult);
+  if (!tiersResult.success) return formatApiFailure("/v1/account/tiers", tiersResult);
+
+  const info = asRecord(asRecord(infoResult.data).data);
+  const limits = asRecord(info.limits);
+  const usage = asRecord(asRecord(usageResult.data).data);
+  const companySearch = asRecord(usage.company_search);
+  const tiers = Array.isArray(asRecord(asRecord(tiersResult.data).data).tiers)
+    ? asRecord(asRecord(tiersResult.data).data).tiers as Record<string, unknown>[]
+    : [];
+
+  const tier = String(info.tier ?? usage.tier ?? "unknown");
+  const mode = String(info.mode ?? "unknown");
+  const dailyLimit = usage.daily_limit ?? limits.daily_limit;
+  const todayCount = usage.today_count;
+  const todayRemaining = usage.today_remaining;
+  const companyDailyLimit = companySearch.daily_limit ?? limits.company_search_daily_limit;
+  const companyToday = companySearch.today_count ?? companySearch.today_requests;
+  const companyRemaining = companySearch.remaining;
+
+  const lines = [
+    "# Apiverket account",
+    `Mode: ${mode}`,
+    `Tier: ${tier}`,
+    `Daily API usage: ${formatNumber(todayCount)} of ${formatNumber(dailyLimit)} used (${formatNumber(todayRemaining)} remaining).`,
+    `Rate limit: ${formatNumber(limits.rate_limit_per_minute ?? usage.rate_limit_per_minute)} requests/minute.`,
+    `Company search: ${formatNumber(companyToday)} of ${formatNumber(companyDailyLimit)} used (${formatNumber(companyRemaining)} remaining).`,
+  ];
+
+  if (typeof companySearch.reset_at === "string") lines.push(`Company-search reset: ${companySearch.reset_at}`);
+  if (typeof companySearch.recent_429_count === "number" && companySearch.recent_429_count > 0) {
+    lines.push(`Recent company-search 429s: ${companySearch.recent_429_count}. Stop retrying search until reset; use /v1/companies/{orgNumber} when org numbers are already known.`);
+  }
+
+  if (tier === "free") {
+    lines.push("Upgrade cue: Free is good for exploration. Upgrade when daily API or company-search limits block a real workflow.");
+  }
+
+  if (tiers.length) {
+    lines.push("\n## Available tiers");
+    for (const item of tiers) {
+      lines.push(`- ${String(item.name)}: ${formatNumber(item.daily_limit)} requests/day, ${formatNumber(item.rate_limit_per_minute)} req/min, ${formatNumber(item.company_search_daily_limit)} company searches/day, ${formatPrice(item.price_sek_per_month)}`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 // ── Tool: govdata_discover ───────────────────────────────────────────
@@ -55,7 +233,7 @@ server.registerTool(
     title: "Discover Apiverket Endpoints",
     description: `Search and browse available Swedish government data endpoints in the Apiverket API.
 
-Use this tool to find the right endpoint before calling govdata_query. Do not guess /v1 paths; discover the supported path here first. The API covers 139 endpoints across 16 categories including weather, transport, economy, health, environment, parliament, police, education, and more.
+Use this tool to find the right endpoint before calling govdata_query. The API covers ${ENDPOINTS.length} endpoints across ${getCategories().length} categories including weather, transport, economy, health, environment, parliament, police, education, and more.
 
 Args:
   - query (string, optional): Keyword to search across endpoint names, descriptions, and paths
@@ -117,11 +295,24 @@ Returns:
 
     if (results.length === 0) {
       return {
-        content: [{ type: "text", text: `No endpoints found matching your search. Try a different keyword or browse categories by calling with no arguments.` }],
+        content: [{ type: "text", text: `No endpoints found matching your search. Try a different keyword, browse categories by calling with no arguments, or use /api outside MCP for the machine-readable endpoint list. Do not guess unsupported /v1 paths.` }],
       };
     }
 
-    const text = `${heading}\n\nFound ${results.length} endpoint(s):\n\n${results.map(formatEndpoint).join("\n\n---\n\n")}`;
+    const playbooks = matchFamilyPlaybooks(params.query, params.category, results).slice(0, 2);
+    if (playbooks.length) {
+      results = [...results].sort((a, b) => {
+        const rankDiff = endpointPlaybookRank(a, playbooks) - endpointPlaybookRank(b, playbooks);
+        if (rankDiff !== 0) return rankDiff;
+        return a.path.localeCompare(b.path);
+      });
+    }
+
+    const playbookText = playbooks.length ? `${playbooks.map(formatFamilyPlaybook).join("\n\n")}\n\n---\n\n` : "";
+    const recommended = playbooks.length
+      ? `\n\n**Top recommended entrypoints:** ${results.slice(0, 3).map((endpoint) => `\`${endpoint.path}\``).join(", ")}`
+      : "";
+    const text = `${heading}\n\n${playbookText}Found ${results.length} endpoint(s):${recommended}\n\n${results.map(formatEndpoint).join("\n\n---\n\n")}`;
 
     return {
       content: [{ type: "text", text: truncateIfNeeded(text) }],
@@ -133,7 +324,6 @@ Returns:
 
 const QueryInputSchema = z.object({
   endpoint: z.string()
-    .max(200)
     .describe("API endpoint path from the discover tool (e.g. '/v1/weather/{city}', '/v1/rates', '/v1/police/events')"),
   path_params: z.record(z.string())
     .optional()
@@ -149,7 +339,7 @@ server.registerTool(
     title: "Query Apiverket API",
     description: `Call any Apiverket API endpoint to retrieve Swedish government data.
 
-Use govdata_discover first to find the right endpoint path and required parameters instead of guessing /v1 paths. Then call this tool with the endpoint path and any path/query parameters.
+Use govdata_discover first to find the right endpoint path and required parameters. Then call this tool with the endpoint path and any path/query parameters.
 
 Args:
   - endpoint (string, required): The API path (e.g. "/v1/weather/{city}")
@@ -183,7 +373,7 @@ Error handling:
       readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
-      openWorldHint: false,
+      openWorldHint: true,
     },
   },
   async (params) => {
@@ -192,7 +382,7 @@ Error handling:
       return {
         content: [{
           type: "text",
-          text: `Error: Unsupported endpoint "${params.endpoint}". Use govdata_discover to select one of the ${ENDPOINTS.length} supported Apiverket endpoints.`,
+          text: formatUnsupportedEndpoint(params.endpoint),
         }],
       };
     }
@@ -220,7 +410,7 @@ Error handling:
       return {
         content: [{
           type: "text",
-          text: `Error querying ${resolvedPath}: ${result.error}`,
+          text: formatApiFailure(resolvedPath, result),
         }],
       };
     }
@@ -230,6 +420,30 @@ Error handling:
       content: [{ type: "text", text: truncateIfNeeded(json) }],
     };
   }
+);
+
+// ── Tool: govdata_account ────────────────────────────────────────────
+
+const AccountInputSchema = z.object({}).strict();
+
+server.registerTool(
+  "govdata_account",
+  {
+    title: "Inspect Apiverket Account Limits",
+    description: `Return sanitized account and quota context for the configured Apiverket API key.
+
+Use this tool when the user asks about limits, quota, production readiness, upgrade needs, or after any 429 response. It reports key mode, tier, daily API usage, company-search usage, reset time, and available tiers without exposing API keys, emails, or identifiers.`,
+    inputSchema: AccountInputSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async () => ({
+    content: [{ type: "text", text: truncateIfNeeded(await buildAccountSummary()) }],
+  })
 );
 
 // ── Resource: endpoint catalog ───────────────────────────────────────
@@ -249,8 +463,10 @@ server.registerResource(
         path: e.path,
         method: e.method,
         summary: e.summary,
+        description: e.description,
         category: e.category,
         parameters: e.parameters,
+        guidance: e.guidance,
       })),
     };
 
@@ -306,7 +522,9 @@ async function main(): Promise<void> {
   console.error("Apiverket MCP server running via stdio");
 }
 
-main().catch((error) => {
-  console.error("Fatal error:", error);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error("Fatal error:", error);
+    process.exit(1);
+  });
+}

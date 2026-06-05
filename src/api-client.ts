@@ -24,40 +24,6 @@ function getApiKey(): string {
 }
 
 /**
- * Builds and validates the outbound Apiverket URL.
- * @param baseUrl - Configured Apiverket base URL
- * @param path - Resolved API path
- * @param queryParams - Optional query parameters
- * @returns A URL object scoped to the configured API origin
- */
-function buildApiUrl(
-  baseUrl: string,
-  path: string,
-  queryParams?: Record<string, string | number | boolean | undefined>
-): URL {
-  if (!path.startsWith("/") || path.startsWith("//") || path.includes("\\") || /[\r\n]/.test(path)) {
-    throw new Error("Endpoint must be a relative API path starting with a single slash.");
-  }
-
-  const base = new URL(baseUrl);
-  const url = new URL(path, base);
-
-  if (url.origin !== base.origin) {
-    throw new Error("Endpoint resolved outside the configured Apiverket API origin.");
-  }
-
-  if (queryParams) {
-    for (const [key, value] of Object.entries(queryParams)) {
-      if (value !== undefined && value !== null) {
-        url.searchParams.set(key, String(value));
-      }
-    }
-  }
-
-  return url;
-}
-
-/**
  * Replaces path parameters like {city} or {code} in a URL template.
  * @param pathTemplate - URL path with {param} placeholders
  * @param pathParams - Object mapping param names to values
@@ -74,12 +40,59 @@ export function resolvePathParams(
   return resolved;
 }
 
+/**
+ * Builds a query string from an object of key-value pairs.
+ * Skips undefined and null values.
+ * @param params - Query parameter object
+ * @returns Query string starting with "?" or empty string
+ */
+function buildQueryString(params: Record<string, string | number | boolean | undefined>): string {
+  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
+  if (entries.length === 0) return "";
+  const qs = entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&");
+  return `?${qs}`;
+}
+
 /** Structured result from an API call. */
 export interface ApiResult {
   success: boolean;
   status: number;
   data: unknown;
   error?: string;
+  errorDetails?: ApiErrorDetails;
+  retryAfter?: string | null;
+}
+
+/** Structured Apiverket error details preserved for agent recovery guidance. */
+export interface ApiErrorDetails {
+  type?: string;
+  code?: string;
+  message?: string;
+  param?: string;
+  source?: string;
+  request_id?: string;
+  rate_limit?: {
+    scope?: string;
+    tier?: string;
+    limit?: number;
+    remaining?: number;
+    reset_at?: string;
+    retry_after_seconds?: number;
+  };
+  guidance?: {
+    action?: string;
+    message?: string;
+    docs_url?: string;
+    upgrade_url?: string;
+  };
+  help?: {
+    message?: string;
+    suggested_endpoint?: string;
+    examples?: string[];
+    available_examples?: string[];
+    docs_url?: string;
+    console_url?: string;
+  };
 }
 
 /**
@@ -94,9 +107,10 @@ export async function callApi(
 ): Promise<ApiResult> {
   const baseUrl = getBaseUrl();
   const apiKey = getApiKey();
+  const qs = queryParams ? buildQueryString(queryParams) : "";
+  const url = `${baseUrl}${path}${qs}`;
 
   try {
-    const url = buildApiUrl(baseUrl, path, queryParams);
     const response = await fetch(url, {
       method: "GET",
       headers: {
@@ -110,9 +124,11 @@ export async function callApi(
 
     if (!response.ok) {
       let errorMessage: string;
+      let errorDetails: ApiErrorDetails | undefined;
       try {
         const errorJson = JSON.parse(body);
-        errorMessage = errorJson.error?.message ?? errorJson.message ?? `HTTP ${response.status}`;
+        errorDetails = errorJson.error;
+        errorMessage = errorDetails?.message ?? errorJson.message ?? `HTTP ${response.status}`;
       } catch {
         errorMessage = `HTTP ${response.status}: ${body.slice(0, 200)}`;
       }
@@ -122,6 +138,8 @@ export async function callApi(
         status: response.status,
         data: null,
         error: errorMessage,
+        errorDetails,
+        retryAfter: response.headers.get("Retry-After"),
       };
     }
 

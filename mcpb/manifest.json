@@ -2,9 +2,9 @@
   "manifest_version": "0.3",
   "name": "apiverket-mcp",
   "display_name": "Apiverket MCP",
-  "version": "1.0.0",
-  "description": "Query Swedish public data through Apiverket, including company data, SCB statistics, weather, transport, and more.",
-  "long_description": "Apiverket MCP gives AI agents two read-only tools for Swedish public data: govdata_discover to find relevant endpoints and govdata_query to call them. It supports company lookup, SCB statistics, weather, transport, public agencies, and other Apiverket endpoints through a consistent JSON API.",
+  "version": "1.2.0",
+  "description": "Query Swedish public data through Apiverket with endpoint discovery, family workflow playbooks, structured recovery guidance, and account limit context.",
+  "long_description": "Apiverket MCP gives AI agents three read-only tools for Swedish public data: govdata_discover to find supported endpoints and recommended family workflows, govdata_query to call endpoints with structured recovery guidance, and govdata_account to inspect sanitized tier and quota context. It includes playbooks for companies, transport, weather, geography, municipalities, jobs, government, culture, education, tourism, and environment so agents can search/list/detail correctly and avoid unsupported path guesses.",
   "author": {
     "name": "Vincent Vukovic",
     "email": "hello@apiverket.se",
@@ -34,11 +34,15 @@
   "tools": [
     {
       "name": "govdata_discover",
-      "description": "Search and browse available Apiverket endpoints"
+      "description": "Search and browse available Apiverket endpoints with recommended family workflows"
     },
     {
       "name": "govdata_query",
       "description": "Call a selected Apiverket endpoint and return structured JSON"
+    },
+    {
+      "name": "govdata_account",
+      "description": "Inspect sanitized account tier, usage, and quota limits for the configured API key"
     }
   ],
   "keywords": [
@@ -77,7 +81,7 @@
     "govdata_api_key": {
       "type": "string",
       "title": "Apiverket API key",
-      "description": "Use sk_test_demo for sandbox data or create a key at https://apiverket.se/login",
+      "description": "Use sk_test_demo for sandbox setup, or create a live key at https://apiverket.se/login for real production data",
       "default": "sk_test_demo",
       "sensitive": true,
       "required": false

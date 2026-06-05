@@ -1,6 +1,6 @@
 {
   "name": "apiverket-mcp-server",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "MCP server for querying Swedish government data via Apiverket API",
   "mcpName": "io.github.vinvuk/apiverket-mcp",
   "type": "module",
@@ -15,6 +15,7 @@
     "build": "tsc",
     "clean": "rm -rf dist",
     "mcpb:pack": "node scripts/build-mcpb.mjs",
+    "smoke:client": "node scripts/smoke-client.mjs",
     "prepack": "npm run clean && npm run build"
   },
   "files": [
