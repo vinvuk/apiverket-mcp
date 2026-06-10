@@ -5,6 +5,8 @@
 
 /** Character limit for tool responses to avoid overwhelming the LLM context. */
 export const CHARACTER_LIMIT = 25_000;
+export const MCP_CLIENT_NAME = "apiverket-mcp";
+export const MCP_CLIENT_VERSION = "1.2.0";
 
 /**
  * Resolves the Apiverket API base URL from environment or defaults to localhost.
@@ -116,6 +118,9 @@ export async function callApi(
       headers: {
         Authorization: `Bearer ${apiKey}`,
         Accept: "application/json",
+        "User-Agent": `${MCP_CLIENT_NAME}/${MCP_CLIENT_VERSION}`,
+        "X-Apiverket-Client": "mcp",
+        "X-Apiverket-MCP-Version": MCP_CLIENT_VERSION,
       },
       signal: AbortSignal.timeout(30_000),
     });
