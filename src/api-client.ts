@@ -84,6 +84,11 @@ export interface ApiErrorDetails {
   guidance?: {
     action?: string;
     message?: string;
+    diagnosis?: {
+      problem?: string;
+      likely_cause?: string;
+      correct_workflow?: string[];
+    };
     docs_url?: string;
     upgrade_url?: string;
   };

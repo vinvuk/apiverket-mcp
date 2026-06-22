@@ -105,6 +105,17 @@ export function formatApiFailure(path: string, result: ApiResult): string {
 
   if (err?.guidance?.message) lines.push(`Guidance: ${err.guidance.message}`);
   if (err?.guidance?.action) lines.push(`Recommended action: ${err.guidance.action}`);
+  if (err?.guidance?.diagnosis) {
+    const diagnosis = err.guidance.diagnosis;
+    if (diagnosis.problem) lines.push(`Diagnosis: ${diagnosis.problem}`);
+    if (diagnosis.likely_cause) lines.push(`Likely cause: ${diagnosis.likely_cause}`);
+    if (diagnosis.correct_workflow?.length) {
+      lines.push("Correct workflow:");
+      diagnosis.correct_workflow.forEach((step, index) => {
+        lines.push(`  ${index + 1}. ${step}`);
+      });
+    }
+  }
 
   const rateLimit = err?.rate_limit;
   if (rateLimit) {
@@ -129,6 +140,11 @@ export function formatApiFailure(path: string, result: ApiResult): string {
   if (err?.rate_limit?.scope === "company_search_daily") {
     lines.push("Company-search recovery: stop retrying search until reset_at, use /v1/companies/{orgNumber} if you already have org numbers, and call govdata_account to inspect the current tier and remaining company-search quota.");
     if (err.guidance?.upgrade_url) lines.push(`Upgrade when needed: ${err.guidance.upgrade_url}`);
+  }
+
+  if (err?.rate_limit?.scope === "company_automation_cooldown") {
+    lines.push("Company workflow recovery: pause retries for the cooldown window. Do not keep retrying the same failing request. Use govdata_discover if the endpoint choice is uncertain, use company search only for discovery, cache org_number, and use lookup for repeated enrichment.");
+    if (err.code === "company_search_retry_loop" && err.guidance?.upgrade_url) lines.push(`Upgrade when search volume becomes production usage: ${err.guidance.upgrade_url}`);
   }
 
   if (err?.param === "orgNumber" || maskPath(path).startsWith("/v1/companies/")) {
