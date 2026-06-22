@@ -69,6 +69,72 @@ function maskPath(path: string): string {
   return path;
 }
 
+function companyAgentRecoveryLines(path: string, result?: ApiResult): string[] {
+  const err = result?.errorDetails;
+  const masked = maskPath(path);
+  const isCompany = masked.startsWith("/v1/companies/")
+    || masked === "/v1/companies/search"
+    || /^\/v1\/companies(?:\/|$)/.test(path);
+  if (!isCompany) return [];
+
+  const code = err?.code ?? "";
+  const scope = err?.rate_limit?.scope ?? "";
+  const isSearchQuota = scope === "company_search_daily" || code === "company_search_daily_limit_exceeded" || code === "company_search_retry_loop";
+  const isWorkflowCooldown = scope === "company_automation_cooldown";
+  const isLookupValidation = err?.param === "orgNumber" || (masked === "/v1/companies/:orgNumber" && result?.status === 400);
+  const isUnsupportedSubpath = masked === "/v1/companies/:orgNumber/:subpath" || code === "endpoint_not_found";
+
+  const lines = [
+    "Agent self-healing instructions:",
+    "  1. Do not call govdata_query again with the same endpoint and params.",
+  ];
+
+  if (isSearchQuota) {
+    lines.push(
+      "  2. Call govdata_account before any further company search to inspect tier, reset time, and remaining company-search quota.",
+      "  3. Call govdata_discover with query=\"company\" if the workflow is uncertain.",
+      "  4. Until search resets, use /v1/companies/{orgNumber} only when org_number is already known.",
+      "  5. Mention upgrade only if the user needs production-scale company discovery/search volume."
+    );
+    return lines;
+  }
+
+  if (isWorkflowCooldown) {
+    lines.push(
+      "  2. Call govdata_account to inspect cooldown/quota context before choosing another company call.",
+      "  3. Call govdata_discover with query=\"company\" to refresh the supported search-then-lookup workflow.",
+      "  4. Only make a new lookup when you have a validated Swedish 10-digit org_number.",
+      "  5. If the user only provided a name or uncertain identifier, wait for search availability and search once, then cache org_number."
+    );
+    return lines;
+  }
+
+  if (isLookupValidation) {
+    lines.push(
+      "  2. Treat the current value as invalid or uncertain; do not transform it into another guessed org number.",
+      "  3. Call govdata_discover with query=\"company\" if you need to re-check the supported workflow.",
+      "  4. If the user gave a company name, call /v1/companies/search once and cache the returned org_number.",
+      "  5. If the user intended an org number, ask for or derive a valid Swedish 10-digit organisation number before lookup."
+    );
+    return lines;
+  }
+
+  if (isUnsupportedSubpath) {
+    lines.push(
+      "  2. Do not guess board, owner, officer, UBO, or other company subresource paths.",
+      "  3. Call govdata_discover with query=\"company\" and choose one of the supported company endpoints.",
+      "  4. Use search for discovery and lookup for enrichment once org_number is known."
+    );
+    return lines;
+  }
+
+  lines.push(
+    "  2. Call govdata_discover with query=\"company\" before trying a different company endpoint.",
+    "  3. Use search only for discovery; cache org_number; use lookup for repeated enrichment."
+  );
+  return lines;
+}
+
 export function formatUnsupportedEndpoint(endpoint: string): string {
   if (/^\/v1\/companies(?:\/|$)/.test(endpoint)) {
     const subresource = /^\/v1\/companies\/[^/]+\/.+/.test(endpoint) || /^\/v1\/companies\/(board|officers?|directors?|owners?|beneficial-owners|ubo|representatives)(?:\/|$)/i.test(endpoint);
@@ -77,6 +143,7 @@ export function formatUnsupportedEndpoint(endpoint: string): string {
       "Use govdata_discover with query=\"company\" to select a supported company endpoint.",
       "Supported workflow: call /v1/companies/search once when you only have a company name, cache the returned org_number, then call /v1/companies/{orgNumber} for repeated lookups.",
       "Apiverket does not expose board, officer, owner, UBO, or other company subresource paths through the company API.",
+      ...companyAgentRecoveryLines(endpoint),
     ].join("\n");
   }
 
@@ -150,6 +217,8 @@ export function formatApiFailure(path: string, result: ApiResult): string {
   if (err?.param === "orgNumber" || maskPath(path).startsWith("/v1/companies/")) {
     lines.push("Company lookup tip: organisation numbers must be valid Swedish 10-digit numbers. If the user only gave a company name, use /v1/companies/search first and cache the returned org_number.");
   }
+
+  lines.push(...companyAgentRecoveryLines(path, result));
 
   const playbooks = matchFamilyPlaybooks(path);
   if (playbooks.length && !maskPath(path).startsWith("/v1/companies/")) {
@@ -521,6 +590,40 @@ Please help me by:
 3. Summarizing the key findings in a clear, structured way
 
 Focus on the most relevant data points and highlight any interesting trends or notable values.`,
+        },
+      },
+    ],
+  })
+);
+
+server.registerPrompt(
+  "recover_company_workflow",
+  {
+    title: "Recover Company Workflow",
+    description: "Guides an agent out of failed Apiverket company lookup/search loops without retrying the same request.",
+    argsSchema: {
+      situation: z.string().optional().describe("What happened, such as invalid org number, search quota, workflow cooldown, or unsupported company subpath."),
+    },
+  },
+  async ({ situation }) => ({
+    messages: [
+      {
+        role: "user",
+        content: {
+          type: "text",
+          text: `Recover the Apiverket company workflow${situation ? ` for this situation: ${situation}` : ""}.
+
+Follow these rules:
+1. Do not retry the same govdata_query endpoint and params that just failed.
+2. If the failure was a 429 or cooldown, call govdata_account before any further company search.
+3. Call govdata_discover with query="company" if endpoint choice or workflow is uncertain.
+4. Use /v1/companies/search only for discovery when the input is a name or uncertain identifier.
+5. Cache the returned org_number.
+6. Use /v1/companies/{orgNumber} for repeated enrichment once org_number is known.
+7. Never guess unsupported company subpaths such as board, owners, officers, UBO, or representatives.
+8. Mention upgrade only when company search/discovery volume is the constraint, not when lookup input is invalid.
+
+Return a concise next-step plan before making another company API call.`,
         },
       },
     ],
