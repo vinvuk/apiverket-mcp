@@ -1814,7 +1814,9 @@ export const ENDPOINTS: Endpoint[] = [
         "Do not use search repeatedly when an org_number is already known."
       ],
       "quotaNotes": [
-        "Organisation-number lookup uses the regular API quota for the key tier."
+        "Live organisation-number lookup has its own Free allowance of 100/day.",
+        "Paid tiers use the regular daily API quota as the practical company lookup limit.",
+        "Call govdata_account to inspect remaining company-lookup quota and reset time."
       ]
     },
     "parameters": [
@@ -1849,7 +1851,7 @@ export const ENDPOINTS: Endpoint[] = [
       ],
       "quotaNotes": [
         "Company search has a separate daily quota: Free 20/day, Starter 100/day, Pro 500/day, Business 2000/day, Enterprise 10000/day.",
-        "Call govdata_account to inspect the current key tier, remaining company-search quota, and reset time."
+        "Call govdata_account to inspect the current key tier, remaining company-search quota, company-lookup quota, and reset time."
       ],
       "upgradeTrigger": "If the user needs more daily company discovery/search volume, suggest upgrading from Free to a paid tier."
     },

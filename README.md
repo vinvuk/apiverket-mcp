@@ -10,7 +10,7 @@ An MCP (Model Context Protocol) server that gives AI assistants access to Swedis
 |------|---------|
 | `govdata_discover` | Search and browse supported Apiverket endpoints before choosing a path |
 | `govdata_query` | Call a discovered endpoint and return structured JSON or recovery guidance |
-| `govdata_account` | Inspect sanitized key mode, tier, daily usage, company-search quota, and upgrade-relevant limits |
+| `govdata_account` | Inspect sanitized key mode, tier, daily usage, company-search/company-lookup quota, and upgrade-relevant limits |
 
 Agents should call `govdata_discover` before `govdata_query` instead of guessing `/v1` paths. After a 429 or when a user asks about limits, agents should call `govdata_account`.
 
@@ -95,7 +95,7 @@ Company search and company lookup have different jobs:
 4. Use `/v1/companies/{orgNumber}` for repeated enrichment and automation.
 5. If company search returns 429, stop retrying until `reset_at`; use lookup when org numbers are already known.
 
-Company search has a separate daily quota by tier. `govdata_account` shows the configured key tier, remaining company-search quota, reset time, and available upgrade tiers. Apiverket does not expose company board, officer, owner, or UBO subresource paths through the company API.
+Company search and live company lookup have separate daily quota context by tier. `govdata_account` shows the configured key tier, remaining company-search quota, remaining company-lookup quota, reset time, and available upgrade tiers. Apiverket does not expose company board, officer, owner, or UBO subresource paths through the company API.
 
 ## Common Family Workflows
 

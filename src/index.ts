@@ -79,6 +79,7 @@ function companyAgentRecoveryLines(path: string, result?: ApiResult): string[] {
 
   const code = err?.code ?? "";
   const scope = err?.rate_limit?.scope ?? "";
+  const isLookupQuota = scope === "company_lookup_daily" || code === "company_lookup_daily_limit_exceeded";
   const isSearchQuota = scope === "company_search_daily" || code === "company_search_daily_limit_exceeded" || code === "company_search_retry_loop";
   const isWorkflowCooldown = scope === "company_automation_cooldown";
   const isLookupValidation = err?.param === "orgNumber" || (masked === "/v1/companies/:orgNumber" && result?.status === 400);
@@ -88,6 +89,16 @@ function companyAgentRecoveryLines(path: string, result?: ApiResult): string[] {
     "Agent self-healing instructions:",
     "  1. Do not call govdata_query again with the same endpoint and params.",
   ];
+
+  if (isLookupQuota) {
+    lines.push(
+      "  2. Call govdata_account before any further company lookup to inspect tier, reset time, and remaining company-lookup quota.",
+      "  3. Do not retry lookup until reset_at; reuse cached company records if the company was already fetched.",
+      "  4. Use /v1/companies/search only for discovery when org_number is unknown, not as a lookup replacement.",
+      "  5. Mention upgrade only if company enrichment volume looks like a production workflow."
+    );
+    return lines;
+  }
 
   if (isSearchQuota) {
     lines.push(
@@ -209,6 +220,11 @@ export function formatApiFailure(path: string, result: ApiResult): string {
     if (err.guidance?.upgrade_url) lines.push(`Upgrade when needed: ${err.guidance.upgrade_url}`);
   }
 
+  if (err?.rate_limit?.scope === "company_lookup_daily") {
+    lines.push("Company-lookup recovery: pause lookup until reset_at, reuse cached company records when possible, use /v1/companies/search only for discovery, and call govdata_account to inspect the current tier and remaining company-lookup quota.");
+    if (err.guidance?.upgrade_url) lines.push(`Upgrade when lookup volume becomes production enrichment: ${err.guidance.upgrade_url}`);
+  }
+
   if (err?.rate_limit?.scope === "company_automation_cooldown") {
     lines.push("Company workflow recovery: pause retries for the cooldown window. Do not keep retrying the same failing request. Use govdata_discover if the endpoint choice is uncertain, use company search only for discovery, cache org_number, and use lookup for repeated enrichment.");
     if (err.code === "company_search_retry_loop" && err.guidance?.upgrade_url) lines.push(`Upgrade when search volume becomes production usage: ${err.guidance.upgrade_url}`);
@@ -259,6 +275,7 @@ export async function buildAccountSummary(): Promise<string> {
   const limits = asRecord(info.limits);
   const usage = asRecord(asRecord(usageResult.data).data);
   const companySearch = asRecord(usage.company_search);
+  const companyLookup = asRecord(usage.company_lookup);
   const tiers = Array.isArray(asRecord(asRecord(tiersResult.data).data).tiers)
     ? asRecord(asRecord(tiersResult.data).data).tiers as Record<string, unknown>[]
     : [];
@@ -271,6 +288,9 @@ export async function buildAccountSummary(): Promise<string> {
   const companyDailyLimit = companySearch.daily_limit ?? limits.company_search_daily_limit;
   const companyToday = companySearch.today_count ?? companySearch.today_requests;
   const companyRemaining = companySearch.remaining;
+  const companyLookupDailyLimit = companyLookup.daily_limit ?? limits.company_lookup_daily_limit;
+  const companyLookupToday = companyLookup.today_count ?? companyLookup.today_requests;
+  const companyLookupRemaining = companyLookup.remaining;
 
   const lines = [
     "# Apiverket account",
@@ -279,21 +299,26 @@ export async function buildAccountSummary(): Promise<string> {
     `Daily API usage: ${formatNumber(todayCount)} of ${formatNumber(dailyLimit)} used (${formatNumber(todayRemaining)} remaining).`,
     `Rate limit: ${formatNumber(limits.rate_limit_per_minute ?? usage.rate_limit_per_minute)} requests/minute.`,
     `Company search: ${formatNumber(companyToday)} of ${formatNumber(companyDailyLimit)} used (${formatNumber(companyRemaining)} remaining).`,
+    `Company lookup: ${formatNumber(companyLookupToday)} of ${formatNumber(companyLookupDailyLimit)} used (${formatNumber(companyLookupRemaining)} remaining).`,
   ];
 
   if (typeof companySearch.reset_at === "string") lines.push(`Company-search reset: ${companySearch.reset_at}`);
+  if (typeof companyLookup.reset_at === "string") lines.push(`Company-lookup reset: ${companyLookup.reset_at}`);
   if (typeof companySearch.recent_429_count === "number" && companySearch.recent_429_count > 0) {
     lines.push(`Recent company-search 429s: ${companySearch.recent_429_count}. Stop retrying search until reset; use /v1/companies/{orgNumber} when org numbers are already known.`);
   }
+  if (typeof companyLookup.recent_429_count === "number" && companyLookup.recent_429_count > 0) {
+    lines.push(`Recent company-lookup 429s: ${companyLookup.recent_429_count}. Pause lookup until reset, reuse cached company records, and upgrade if enrichment volume is production usage.`);
+  }
 
   if (tier === "free") {
-    lines.push("Upgrade cue: Free is good for exploration. Upgrade when daily API or company-search limits block a real workflow.");
+    lines.push("Upgrade cue: Free is good for exploration. Upgrade when daily API, company-search, or company-lookup limits block a real workflow.");
   }
 
   if (tiers.length) {
     lines.push("\n## Available tiers");
     for (const item of tiers) {
-      lines.push(`- ${String(item.name)}: ${formatNumber(item.daily_limit)} requests/day, ${formatNumber(item.rate_limit_per_minute)} req/min, ${formatNumber(item.company_search_daily_limit)} company searches/day, ${formatPrice(item.price_sek_per_month)}`);
+      lines.push(`- ${String(item.name)}: ${formatNumber(item.daily_limit)} requests/day, ${formatNumber(item.rate_limit_per_minute)} req/min, ${formatNumber(item.company_search_daily_limit)} company searches/day, ${formatNumber(item.company_lookup_daily_limit)} company lookups/day, ${formatPrice(item.price_sek_per_month)}`);
     }
   }
 
@@ -410,10 +435,10 @@ Returns:
 const QueryInputSchema = z.object({
   endpoint: z.string()
     .describe("API endpoint path from the discover tool (e.g. '/v1/weather/{city}', '/v1/rates', '/v1/police/events')"),
-  path_params: z.record(z.string())
+  path_params: z.record(z.string(), z.string())
     .optional()
     .describe("Path parameter values to substitute in the endpoint URL. Example: { \"city\": \"stockholm\" } for /v1/weather/{city}"),
-  query_params: z.record(z.union([z.string(), z.number(), z.boolean()]))
+  query_params: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]))
     .optional()
     .describe("Query string parameters. Example: { \"q\": \"developer\", \"limit\": 5 } for search endpoints"),
 }).strict();
@@ -517,7 +542,7 @@ server.registerTool(
     title: "Inspect Apiverket Account Limits",
     description: `Return sanitized account and quota context for the configured Apiverket API key.
 
-Use this tool when the user asks about limits, quota, production readiness, upgrade needs, or after any 429 response. It reports key mode, tier, daily API usage, company-search usage, reset time, and available tiers without exposing API keys, emails, or identifiers.`,
+Use this tool when the user asks about limits, quota, production readiness, upgrade needs, or after any 429 response. It reports key mode, tier, daily API usage, company-search usage, company-lookup usage, reset time, and available tiers without exposing API keys, emails, or identifiers.`,
     inputSchema: AccountInputSchema,
     annotations: {
       readOnlyHint: true,
